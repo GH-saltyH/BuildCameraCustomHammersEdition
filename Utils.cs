@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -6,6 +6,8 @@ namespace Valheim_Build_Camera
 {
 	public static class Utils
 	{
+		private static float _nextCameraDiagnostic;
+
 		private const float ComfortRefreshInterval = 0.2f;
 		private static readonly Collider[] NearbyPickupColliders = new Collider[128];
 		private static readonly HashSet<int> NearbyPickupItemIds = new();
@@ -224,15 +226,62 @@ namespace Valheim_Build_Camera
 
 		internal static void UpdateBuildCamera(float dt, GameCamera camera)
 		{
-			if (Console.IsVisible() || !Player.m_localPlayer.TakeInput() || Hud.IsPieceSelectionVisible()) return;
+            bool console = Console.IsVisible();
+            bool takeInput = Player.m_localPlayer.TakeInput();
+            bool pieceSelection = Hud.IsPieceSelectionVisible();
+
+            bool diagnostic = Time.time >= _nextCameraDiagnostic;
+
+            if (diagnostic)
+            {
+                _nextCameraDiagnostic = Time.time + 1f;
+
+                Valheim_Build_CameraPlugin.BuildCameraCHELogger.LogInfo(
+                    $"[BuildCamera] Active={InBuildMode()}, " +
+                    $"Console={console}, " +
+                    $"TakeInput={takeInput}, " +
+                    $"PieceSelection={pieceSelection}, " +
+                    $"W={ZInput.GetButton("Forward")}, " +
+                    $"A={ZInput.GetButton("Left")}, " +
+                    $"S={ZInput.GetButton("Backward")}, " +
+                    $"D={ZInput.GetButton("Right")}, " +
+                    $"MouseX={Input.GetAxis("Mouse X")}, " +
+                    $"MouseY={Input.GetAxis("Mouse Y")}"
+                );
+            }
+
+            if (console || !takeInput || pieceSelection) return;
+
 			Vector3 movement = GetMovementInput(dt);
 			Transform cameraTransform = camera.transform;
-			if (Valheim_Build_CameraPlugin.moveWithRespectToWorld.Value != Valheim_Build_CameraPlugin.Toggle.On)
+
+			if (Valheim_Build_CameraPlugin.moveWithRespectToWorld.Value 
+				!= Valheim_Build_CameraPlugin.Toggle.On)
+			{ 
 				movement = cameraTransform.TransformVector(movement);
-			Vector3 wantedPosition = ClampToStationRange(cameraTransform.position + movement);
-			cameraTransform.position = ClampToTerrain(cameraTransform.position, wantedPosition);
-			cameraTransform.rotation = UpdateBuildCameraViewDirection(dt);
-		}
+			}
+
+            Vector3 previousPosition = cameraTransform.position;
+            Vector3 wantedPosition =
+                ClampToStationRange(previousPosition + movement);
+
+            Vector3 finalPosition =
+                ClampToTerrain(previousPosition, wantedPosition);
+
+            cameraTransform.position = finalPosition;
+            cameraTransform.rotation = UpdateBuildCameraViewDirection(dt);
+
+            if (diagnostic)
+            {
+                Valheim_Build_CameraPlugin.BuildCameraCHELogger.LogInfo(
+                    $"[BuildCamera Movement] " +
+                    $"InputDelta={movement}, " +
+                    $"Wanted={wantedPosition}, " +
+                    $"Final={finalPosition}, " +
+                    $"Moved={(finalPosition - previousPosition).magnitude:F5}"
+                );
+            }
+        }
 
 		private static bool HasRequiredComfort()
 		{
